@@ -1,0 +1,106 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+.conda/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+credentials/
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+*.sqlite3
+
+# Test and coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.tox/
+.pytest_cache/
+
+# Application specific
+download/
+Downloads/
+tmp/
+playbooks/
+public-apis/
+jarvis/
+work in download/
+wnl/
+*.pid
+*.seed
+*.pid.lock
+
+# Node (if any frontend deps)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# GIMP / design assets
+*.gbr
+*.pat
+*.gpl
+*.xcache*
+
+# LibreOffice / Office temp files
+~$*
+*.tmp
+*.temp
+
+# ZMQ / runtime
+*.zmq/
+socket/
+.pids/
+
+# MyPy, mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Type checking
+.pytype/
+.pyre/

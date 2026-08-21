@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AI PC Agent
+Comment=Voice-activated desktop AI automation agent
+Exec=python3 /home/layon/ai-pc-agent/main.py --tray
+Icon=utilities-terminal
+Terminal=false
+Categories=Utility;
+NoDisplay=true

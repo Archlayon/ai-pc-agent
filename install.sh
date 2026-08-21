@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="AI PC Agent"
+DESKTOP_FILE="com.layon.aiagent.desktop"
+INSTALL_DIR="${HOME}/.local/share/ai-pc-agent"
+CONFIG_DIR="${HOME}/.config/ai-pc-agent"
+APPLICATIONS_DIR="${HOME}/.local/share/applications"
+VENV_DIR="${INSTALL_DIR}/venv"
+
+echo "=== ${APP_NAME} Installer ==="
+echo ""
+
+# Check Python version
+if ! command -v python3 &>/dev/null; then
+    echo "[error] python3 is not installed. Please install Python 3.10 or later."
+    exit 1
+fi
+
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+echo "[ok] Python ${PYTHON_VERSION} found"
+
+# Install system dependencies (Fedora/RHEL)
+if command -v dnf &>/dev/null; then
+    echo "[info] Installing system dependencies via dnf..."
+    sudo dnf install -y python3-dbus python3-gobject brightnessctl pactl || true
+elif command -v apt &>/dev/null; then
+    echo "[info] Installing system dependencies via apt..."
+    sudo apt install -y python3-dbus python3-gi brightnessctl pactl || true
+else
+    echo "[warn] Could not detect package manager. Please install manually:"
+    echo "  - python3-dbus, python3-gi/blueprint-compiler"
+    echo "  - brightnessctl, pactl"
+fi
+
+# Create directories
+echo "[info] Creating directories..."
+mkdir -p "${INSTALL_DIR}"
+mkdir -p "${CONFIG_DIR}"
+mkdir -p "${APPLICATIONS_DIR}"
+
+# Copy desktop file
+echo "[info] Installing desktop file..."
+cp "${DESKTOP_FILE}" "${APPLICATIONS_DIR}/"
+echo "[ok] Desktop file installed to ${APPLICATIONS_DIR}/${DESKTOP_FILE}"
+
+# Create virtual environment
+echo "[info] Creating virtual environment..."
+python3 -m venv --system-site-packages "${VENV_DIR}"
+"${VENV_DIR}/bin/pip" install --upgrade pip setuptools wheel
+echo "[ok] Virtual environment created at ${VENV_DIR}"
+
+# Install package
+echo "[info] Installing AI PC Agent..."
+"${VENV_DIR}/bin/pip" install -e .
+echo "[ok] Package installed in development mode"
+
+# Create launcher script
+echo "[info] Creating launcher scripts..."
+cat > "${INSTALL_DIR}/run.sh" << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/venv/bin/activate"
+cd "${SCRIPT_DIR}"
+
+if [[ "${1:-}" == "--tray" ]]; then
+    exec python3 main.py --tray
+elif [[ "${1:-}" == "--voice" ]]; then
+    exec python3 main.py --voice
+elif [[ "${1:-}" == "--hotkey" ]]; then
+    exec python3 hotkey_listener.py
+else
+    exec python3 main.py
+fi
+EOF
+chmod +x "${INSTALL_DIR}/run.sh"
+
+# Create XDG autostart entry (optional)
+read -p "Do you want to start AI PC Agent automatically on login? [y/N] " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    AUTOSTART_DIR="${HOME}/.config/autostart"
+    mkdir -p "${AUTOSTART_DIR}"
+    cp "${APPLICATIONS_DIR}/${DESKTOP_FILE}" "${AUTOSTART_DIR}/"
+    echo "[ok] Autostart enabled"
+fi
+
+echo ""
+echo "=== Installation Complete ==="
+echo ""
+echo "To run the agent:"
+echo "  ${INSTALL_DIR}/run.sh           # CLI text mode"
+echo "  ${INSTALL_DIR}/run.sh --voice   # CLI voice mode"
+echo "  ${INSTALL_DIR}/run.sh --tray    # System tray daemon (recommended)"
+echo "  ${INSTALL_DIR}/run.sh --hotkey  # Global hotkey listener only"
+echo ""
+echo "Configuration: ${CONFIG_DIR}/config.json"
+echo "Logs:          ${INSTALL_DIR}/logs/ (if created)"
+echo ""
+echo "Next steps:"
+echo "  1. Set GEMINI_API_KEY in your environment or config"
+echo "  2. Run: ${INSTALL_DIR}/run.sh --tray"
+echo "  3. Look for the AI PC Agent icon in your system tray"
+echo "  4. Press Control+L to activate"
+echo ""

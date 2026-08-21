@@ -1,0 +1,9 @@
+include README.md
+include LICENSE
+include requirements.txt
+include Makefile
+include install.sh
+include com.layon.aiagent.desktop
+recursive-include ai_pc_agent *.py
+recursive-include ai_pc_agent/agents *.py
+recursive-include ai_pc_agent/tools *.py
