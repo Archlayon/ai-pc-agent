@@ -14,7 +14,9 @@ from tool_registry import dispatch, get_declarations
 
 MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
 HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-LLM_TIMEOUT = 20
+# Local CPU inference on an 8B model routinely takes 30-60s, so the old 20s
+# cap aborted nearly every request. Override with OLLAMA_TIMEOUT if needed.
+LLM_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
 
 
 def _generate_with_timeout(fn, *args, timeout=LLM_TIMEOUT, **kwargs):
@@ -38,8 +40,45 @@ def _generate_with_timeout(fn, *args, timeout=LLM_TIMEOUT, **kwargs):
     return result[0]
 
 
+def _wrap_tools(declarations):
+    """Adapt bare {name, description, parameters} decls to Ollama's schema.
+
+    Ollama expects each tool as {"type": "function", "function": {...}}, while
+    the shared registry emits the bare Gemini-style shape.
+    """
+    wrapped = []
+    for decl in declarations:
+        wrapped.append({
+            "type": "function",
+            "function": {
+                "name": decl["name"],
+                "description": decl.get("description", ""),
+                "parameters": decl.get("parameters", {"type": "object", "properties": {}}),
+            },
+        })
+    return wrapped
+
+
+def _tool_name_and_args(tool_call):
+    """Read a tool call from either a mapping or an ollama model object.
+
+    Newer ollama releases return ToolCall/Function pydantic objects rather than
+    plain dicts, so both shapes have to be handled.
+    """
+    if isinstance(tool_call, dict):
+        function = tool_call.get("function") or {}
+        return function.get("name"), function.get("arguments") or {}
+    function = getattr(tool_call, "function", None)
+    if function is None:
+        return None, {}
+    if isinstance(function, dict):
+        return function.get("name"), function.get("arguments") or {}
+    return getattr(function, "name", None), getattr(function, "arguments", None) or {}
+
+
 def ask_agent(user_text: str) -> str:
-    tools = get_declarations()
+    declarations = get_declarations()
+    tools = _wrap_tools(declarations)
     messages = [
         {
             "role": "system",
@@ -76,16 +115,19 @@ def ask_agent(user_text: str) -> str:
     if tool_calls:
         output_parts = []
         for tc in tool_calls:
-            name = tc["function"]["name"]
-            args = tc["function"]["arguments"]
+            name, args = _tool_name_and_args(tc)
+            if not name:
+                continue
             print(f"[ollama] wants to call: {name}({args})")
             result = dispatch(name, args)
             print(f"[result] {result}")
             output_parts.append(result)
         return "\n".join(output_parts) if output_parts else "[ollama] (no result)"
 
-    content = msg.get("content", "").strip()
-    return content if content else "[ollama] (no response)"
+    content = (msg.get("content") or "").strip()
+    # An empty reply means the caller should fall through to the next backend
+    # rather than surfacing a placeholder as if it were an answer.
+    return content
 
 
 def is_available() -> bool:

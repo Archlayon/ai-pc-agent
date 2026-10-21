@@ -1,17 +1,21 @@
 """
 Multi-backend LLM client for the AI PC Agent.
 
-Priority:
+Priority (controlled by LLM_BACKEND, default "auto"):
 1. Ollama local LLM (if available) - no rate limits, offline
-2. Local fast-path for simple commands - instant execution
-3. Local keyword fallback - always available
+2. Gemini API (if GEMINI_API_KEY is set)
+3. Local fast-path for simple commands - instant execution
+4. Local keyword fallback - always available
+
+Gemini was previously disabled by default because of rate limits and quota
+exhaustion. It remains available via LLM_BACKEND=gemini or LLM_BACKEND=auto.
 
 Supports multi-turn conversation memory stored in SQLite and tool calling.
-Gemini API was removed due to rate limits and quota exhaustion.
 """
 import os
 import re
 import threading
+import time
 
 from memory import append_message, get_context, prune_old
 from tool_registry import dispatch, get_declarations
@@ -387,6 +391,11 @@ def _fast_path(text: str) -> str:
 
 
 def _call_gemini(user_text: str, session_id: str) -> str:
+    # Imported lazily: the local Ollama path does not need these, and this
+    # backend was previously disabled.
+    from google import genai
+    from google.genai import types
+
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not set")
@@ -427,10 +436,10 @@ def _call_gemini(user_text: str, session_id: str) -> str:
         contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
 
     response = _generate_with_timeout(
-        client,
-        MODEL,
-        contents,
-        types.GenerateContentConfig(
+        client.models.generate_content,
+        model=MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
             tools=[tool],
             system_instruction=system_instruction,
         ),
@@ -534,43 +543,79 @@ def ask_agent(user_text: str, session_id: str = SESSION_ID) -> str:
 
     backends = []
 
-    try:
-        from ollama_client import is_available
-        if is_available():
-            backends.append(("ollama", lambda: _call_ollama(user_text, session_id)))
-    except Exception:
-        pass
+    # Backend preference: "auto" prefers Gemini when an API key is present and
+    # falls back to a local Ollama model, "gemini"/"ollama" pin one backend.
+    # Local CPU inference with the full tool set is unusably slow on this host
+    # (no GPU, 20-460s per request), so auto prefers the hosted API.
+    preference = os.environ.get("LLM_BACKEND", "auto").lower()
+
+    def _add_gemini():
+        if os.environ.get("GEMINI_API_KEY"):
+            backends.append(("gemini", lambda: _call_gemini(user_text, session_id)))
+
+    def _add_ollama():
+        try:
+            from ollama_client import is_available
+            if is_available():
+                backends.append(("ollama", lambda: _call_ollama(user_text, session_id)))
+        except Exception:
+            pass
+
+    if preference == "ollama":
+        _add_ollama()
+    else:
+        _add_gemini()
+        _add_ollama()
+
+    # Transient overload (503/UNAVAILABLE) is common on the hosted API and
+    # usually clears within seconds, so retry with backoff before giving up.
+    transient = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "quota")
+    attempts = 3 if preference != "ollama" else 1
 
     last_error = None
     for name, fn in backends:
-        try:
-            result = fn()
-            if result:
-                return result
-        except Exception as e:
-            last_error = e
-            error_str = str(e)
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
-                print(f"[llm] {name} rate limited, trying next backend...", flush=True)
-            else:
-                print(f"[llm] {name} error: {e}", flush=True)
+        for attempt in range(1, attempts + 1):
+            try:
+                result = fn()
+                if result:
+                    return result
+                break
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                is_transient = any(t.lower() in error_str.lower() for t in transient)
+                if is_transient and attempt < attempts:
+                    delay = 2 * attempt
+                    print(
+                        f"[llm] {name} busy ({error_str[:60]}), "
+                        f"retry {attempt}/{attempts - 1} in {delay}s...",
+                        flush=True,
+                    )
+                    time.sleep(delay)
+                    continue
+                if is_transient:
+                    print(f"[llm] {name} rate limited, trying next backend...", flush=True)
+                else:
+                    print(f"[llm] {name} error: {e}", flush=True)
+                break
 
     simple = _simple_response(user_text)
     if simple:
         append_message(session_id, "assistant", simple)
         return simple
 
-    search_query = user_text.strip()
-    if search_query:
-        try:
-            from tool_registry import _open_url
-            return _open_url(f"https://www.google.com/search?q={search_query.replace(' ', '+')}")
-        except Exception:
-            pass
+    # Return a link rather than launching a browser. Popping open a window
+    # unprompted hijacks the screen, and the previous behaviour masked the
+    # real backend error behind an apparently successful action.
+    from urllib.parse import quote_plus
 
-    msg = "[error] All LLM backends failed. Try installing Ollama for offline use."
+    search_url = f"https://duckduckgo.com/?q={quote_plus(user_text.strip())}"
+    msg = (
+        "[error] All LLM backends failed. "
+        f"You can search manually: {search_url}"
+    )
     if last_error:
-        msg += f" Last error: {last_error}"
+        msg += f"\nLast error: {last_error}"
     append_message(session_id, "assistant", msg)
     return msg
 

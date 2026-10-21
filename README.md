@@ -51,18 +51,35 @@ cp com.layon.aiagent.desktop ~/.local/share/applications/
 
 ## Running
 
+Always run through `run.sh` (it picks the project venv, then the installed
+venv at `~/.local/share/ai-pc-agent/venv`, then `python3`). The system
+`python3` is missing several dependencies, so do not call `main.py` directly
+unless the venv is already active.
+
 ```bash
-# System tray daemon (recommended)
-./run.sh --tray
+cd ai-pc-agent
 
-# CLI text mode
-./run.sh
+./run.sh hud       # Jarvis arc reactor HUD with voice control (main mode)
+./run.sh tray      # Background system tray daemon
+./run.sh widget    # Floating GUI widget
+./run.sh voice     # CLI voice mode
+./run.sh cli       # CLI text mode (default)
+./run.sh hotkey    # Global hotkey listener only
+./run.sh audit     # Security self-audit
+./run.sh status    # Print current agent status
+./run.sh help      # Show all modes
+```
 
-# CLI voice mode
-./run.sh --voice
+`make run-hud`, `make run-tray`, `make status`, etc. wrap the same commands.
 
-# Global hotkey listener only
-./run.sh --hotkey
+The HUD forks itself into the background on startup, so `./run.sh hud` returns
+immediately. Use `./kill.sh` to stop it.
+
+After `./install.sh` the same modes are also available from the installed
+launcher, which does not depend on the current directory:
+
+```bash
+~/.local/share/ai-pc-agent/run.sh hud
 ```
 
 ## Configuration
@@ -140,9 +157,9 @@ adds a portable, observable, and self-improving layer:
 #### CLI Commands
 
 ```bash
-python3 main.py --audit    # Run security self-audit
-python3 main.py --status   # Print current agent status
-python3 main.py            # CLI text mode (unchanged)
+./run.sh audit     # Run security self-audit
+./run.sh status    # Print current agent status
+./run.sh cli       # CLI text mode
 ```
 
 ## Safety Model

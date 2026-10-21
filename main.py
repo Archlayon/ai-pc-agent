@@ -9,9 +9,37 @@ Usage:
     python3 main.py --hud        # Jarvis arc reactor HUD
 """
 import argparse
+import os
 import sys
 
 from settings import get_settings
+
+
+def _load_env():
+    """Load API keys from the project .env into the environment.
+
+    The Jarvis HUD does this itself in jarvis/jarvis_main.py, but the CLI,
+    tray, and widget entry points did not, so GEMINI_API_KEY was missing and
+    every request fell through to the local model.
+    """
+    for candidate in (
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.expanduser("~/.local/share/ai-pc-agent/.env"),
+    ):
+        if not os.path.exists(candidate):
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, value = line.split("=", 1)
+                        os.environ.setdefault(key.strip(), value.strip())
+        except Exception:
+            pass
+
+
+_load_env()
 
 
 def run_cli(voice: bool = False):
@@ -37,7 +65,9 @@ def run_cli(voice: bool = False):
         except (EOFError, KeyboardInterrupt):
             break
         if text:
-            ask_agent(text)
+            response = ask_agent(text)
+            if response:
+                print(response)
 
 
 def run_tray():
